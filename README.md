@@ -64,6 +64,11 @@ python3 skills/learning-path-designer/scripts/render.py plan.md plan.pdf
 - 中文字体走系统 `PingFang SC`，无需嵌入字体文件
 - 依赖：macOS / Linux 上装有 Chrome 或 Chromium（可用 `CHROME_PATH` 指定）
 
+## 文档
+
+- [`docs/design-notes.md`](docs/design-notes.md) —— 这个技能为什么这么设计：从"要一份书单"到"学习系统"的推导、学习科学依据、安装与触发机制
+- [`docs/sample-learning-path.pdf`](docs/sample-learning-path.pdf) —— 渲染产物示例（7 页：封面 / 目录 / 分节正文 / 附录）
+
 ## 设计取向
 
 `learning-path-designer` 的取舍是反直觉的：用户要书单，但它不先给书单。
