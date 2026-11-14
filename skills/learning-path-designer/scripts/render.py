@@ -261,6 +261,9 @@ h1, h2, h3, h4 { line-height: 1.35; break-after: avoid-page; }
 main > h2 {
   break-before: page;
 }
+main.single > h2 {
+  break-before: auto;
+}
 h2 {
   font-size: 16pt;
   margin: 20pt 0 10pt;
@@ -348,7 +351,30 @@ tr { break-inside: avoid; }
 """
 
 
-def build_document(meta: dict[str, str], body_html: str, toc: list[tuple[int, str, str]]) -> str:
+def split_sections(body: str) -> list[str]:
+    """Split the Markdown body at top-level '## ' headings."""
+    chunks: list[list[str]] = [[]]
+    for line in body.splitlines():
+        if re.match(r"^##\s+", line) and any(x.strip() for x in chunks[-1]):
+            chunks.append([])
+        chunks[-1].append(line)
+    return ["\n".join(c) for c in chunks if any(x.strip() for x in c)]
+
+
+def build_section_document(body_html: str, running: str, footer: str) -> str:
+    css = CSS % {"running": running, "footer": footer}
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        f"<style>{css}</style></head><body><main class=\"single\">{body_html}</main></body></html>"
+    )
+
+
+def build_document(
+    meta: dict[str, str],
+    body_html: str,
+    toc: list[tuple[int, str, str]],
+    pages: list[int] | None = None,
+) -> str:
     title = meta.get("title", "学习路径")
     subtitle = meta.get("subtitle", "")
     meta_rows = []
@@ -363,10 +389,10 @@ def build_document(meta: dict[str, str], body_html: str, toc: list[tuple[int, st
             meta_rows.append(f'<div><b>{label}</b>{html.escape(meta[key])}</div>')
 
     top = [(text, hid) for level, text, hid in toc if level == 2]
-    numbered = len(top) <= 24
+    numbered = bool(pages) and len(pages) == len(top)
     toc_items = []
-    for index, (text, hid) in enumerate(top, start=1):
-        page = index + 2 if numbered else ""
+    for index, (text, hid) in enumerate(top):
+        page = str(3 + sum(pages[:index])) if numbered else ""
         toc_items.append(
             f'<li class="l2"><a href="#{hid}"><span class="t">{inline(text)}</span>'
             f'<span class="pg">{page}</span></a></li>'
@@ -426,29 +452,7 @@ def page_count(pdf: Path) -> int:
     return len(re.findall(rb"/Type\s*/Page[^s]", data)) or 1
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", type=Path)
-    parser.add_argument("output", nargs="?", type=Path)
-    parser.add_argument("--keep-html", action="store_true", help="keep the intermediate HTML next to the PDF")
-    args = parser.parse_args()
-
-    source: Path = args.source.expanduser().resolve()
-    if not source.exists():
-        sys.exit(f"ERROR: source not found: {source}")
-
-    output = (args.output or source.with_suffix(".pdf")).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-
-    meta, body = split_frontmatter(source.read_text(encoding="utf-8"))
-    body_html, toc = md_to_html(body)
-    document = build_document(meta, body_html, toc)
-
-    html_path = output.with_suffix(".html")
-    html_path.write_text(document, encoding="utf-8")
-
-    chrome = find_chrome()
-    profile = tempfile.mkdtemp(prefix="lp-pdf-")
+def run_chrome(chrome: str, profile: str, html_path: Path, pdf_path: Path) -> None:
     cmd = [
         chrome,
         "--headless=new",
@@ -458,27 +462,90 @@ def main() -> int:
         "--run-all-compositor-stages-before-draw",
         "--virtual-time-budget=4000",
         f"--user-data-dir={profile}",
-        f"--print-to-pdf={output}",
+        f"--print-to-pdf={pdf_path}",
         html_path.as_uri(),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-    shutil.rmtree(profile, ignore_errors=True)
+    if not pdf_path.exists():
+        sys.exit(f"ERROR: Chrome did not produce {pdf_path}\n{result.stderr[-800:]}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", type=Path)
+    parser.add_argument("output", nargs="?", type=Path)
+    parser.add_argument("--keep-html", action="store_true", help="keep the intermediate HTML next to the PDF")
+    parser.add_argument("--no-toc-pages", action="store_true", help="skip the layout pass; TOC has no page numbers")
+    args = parser.parse_args()
+
+    source: Path = args.source.expanduser().resolve()
+    if not source.exists():
+        sys.exit(f"ERROR: source not found: {source}")
+
+    output = (args.output or source.with_suffix(".pdf")).expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    meta, body = split_frontmatter(source.read_text(encoding="utf-8"))
+    body_html, toc = md_to_html(body)
+    top = [(text, hid) for level, text, hid in toc if level == 2]
+
+    chrome = find_chrome()
+    profile = tempfile.mkdtemp(prefix="lp-pdf-")
+    try:
+        pages = None
+        if not args.no_toc_pages and 1 <= len(top) <= 20:
+            sections = split_sections(body)
+            if len(sections) == len(top):
+                pages = []
+                with tempfile.TemporaryDirectory(prefix="lp-sec-") as tmp:
+                    for index, section in enumerate(sections):
+                        section_html, _ = md_to_html(section)
+                        doc = build_section_document(
+                            section_html,
+                            meta.get("running", meta.get("title", "")),
+                            meta.get("footer", "learning-path-designer"),
+                        )
+                        html_file = Path(tmp) / f"section-{index}.html"
+                        pdf_file = Path(tmp) / f"section-{index}.pdf"
+                        html_file.write_text(doc, encoding="utf-8")
+                        run_chrome(chrome, profile, html_file, pdf_file)
+                        pages.append(page_count(pdf_file))
+                print(f"layout {len(pages)} sections -> {sum(pages)} pages")
+
+        document = build_document(meta, body_html, toc, pages)
+        html_path = output.with_suffix(".html")
+        html_path.write_text(document, encoding="utf-8")
+        run_chrome(chrome, profile, html_path, output)
+
+        total = page_count(output)
+        if pages and total != 2 + sum(pages):
+            print(
+                f"WARNING: layout predicted {2 + sum(pages)} pages but produced {total}; "
+                "dropping TOC page numbers.",
+                file=sys.stderr,
+            )
+            document = build_document(meta, body_html, toc, None)
+            html_path.write_text(document, encoding="utf-8")
+            run_chrome(chrome, profile, html_path, output)
+            total = page_count(output)
+            pages = None
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
 
     if not output.exists():
-        sys.exit(f"ERROR: Chrome did not produce {output}\n{result.stderr[-800:]}")
+        sys.exit(f"ERROR: Chrome did not produce {output}")
 
     if not args.keep_html:
-        html_path.unlink(missing_ok=True)
+        output.with_suffix(".html").unlink(missing_ok=True)
 
     size_kb = output.stat().st_size / 1024
-    pages = page_count(output)
-    if pages < 2:
+    if total < 2:
         print("WARNING: only 1 page produced; check the Markdown structure.", file=sys.stderr)
 
     print(f"PDF   {output}")
-    print(f"pages {pages}")
+    print(f"pages {total}")
     print(f"size  {size_kb:.0f} KB")
-    print(f"toc   {len(toc)} entries")
+    print(f"toc   {len(top)} entries")
+    print(f"toc#  {'yes' if pages else 'no'}")
     return 0
 
 
