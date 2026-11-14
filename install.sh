@@ -58,6 +58,7 @@ case "${1:-install}" in
       rm -rf "$DST_ROOT/$name"
       mkdir -p "$DST_ROOT/$name"
       cp -R "$SRC_ROOT/$name/." "$DST_ROOT/$name/"
+      find "$DST_ROOT/$name" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
       echo "  -> $DST_ROOT/$name/"
     done < <(skills)
     echo "done. DSH watches this root and refreshes its catalog automatically."
