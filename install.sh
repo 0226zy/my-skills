@@ -55,9 +55,10 @@ case "${1:-install}" in
     while read -r name; do
       [ -n "$name" ] || continue
       validate "$SRC_ROOT/$name/SKILL.md" "$name"
+      rm -rf "$DST_ROOT/$name"
       mkdir -p "$DST_ROOT/$name"
-      cp "$SRC_ROOT/$name/SKILL.md" "$DST_ROOT/$name/SKILL.md"
-      echo "  -> $DST_ROOT/$name/SKILL.md"
+      cp -R "$SRC_ROOT/$name/." "$DST_ROOT/$name/"
+      echo "  -> $DST_ROOT/$name/"
     done < <(skills)
     echo "done. DSH watches this root and refreshes its catalog automatically."
     ;;
@@ -72,7 +73,7 @@ case "${1:-install}" in
       if [ ! -f "$DST_ROOT/$name/SKILL.md" ]; then
         echo "  --  $name not installed"
         status=1
-      elif cmp -s "$SRC_ROOT/$name/SKILL.md" "$DST_ROOT/$name/SKILL.md"; then
+      elif diff -r -q "$SRC_ROOT/$name" "$DST_ROOT/$name" >/dev/null 2>&1; then
         echo "  =   $name in sync"
       else
         echo "  !=  $name differs; run ./install.sh"

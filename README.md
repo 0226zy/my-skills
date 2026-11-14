@@ -6,7 +6,7 @@
 
 | 技能 | 一句话 | 触发示例 |
 |---|---|---|
-| [`learning-path-designer`](skills/learning-path-designer/SKILL.md) | 把"要一份书单"改造成一套可执行的学习系统：科普说明 → 知识大纲 → 概念图 → 可核验资源 → 阶段计划 + 检索题 + 间隔复习 | `学习下面的领域：` + `科普领域：xx` |
+| [`learning-path-designer`](skills/learning-path-designer/SKILL.md) | 把"要一份书单"改造成一套可执行的学习系统，并输出排版好的 PDF 手册：科普说明 → 知识大纲 → 概念图 → 可核验资源 → 阶段计划 + 检索题 + 间隔复习 | `学习下面的领域：` + `科普领域：xx` |
 
 ## 安装
 
@@ -37,10 +37,32 @@ my-skills/
 ├── README.md
 └── skills/
     └── learning-path-designer/
-        └── SKILL.md
+        ├── SKILL.md
+        └── scripts/
+            └── render.py
 ```
 
-之所以放在 `skills/` 子目录而不是仓库根：DSH 只扫描技能根的一层目录（`<root>/<name>/SKILL.md`），仓库根同时放 `README.md` 会被误判成技能并产生告警。`install.sh` 负责把 `skills/*` 铺平到技能根。
+之所以放在 `skills/` 子目录而不是仓库根：DSH 只扫描技能根的一层目录（`<root>/<name>/SKILL.md`），仓库根同时放 `README.md` 会被误判成技能并产生告警。`install.sh` 负责把 `skills/*` 整目录铺平到技能根。
+
+## PDF 输出
+
+`learning-path-designer` 的默认交付是 **PDF + Markdown 源文件**。渲染链路是零依赖的：
+
+```text
+Markdown → 自带样式表的 HTML → 无头 Chrome --print-to-pdf → A4 PDF
+```
+
+```bash
+python3 skills/learning-path-designer/scripts/render.py plan.md plan.pdf
+```
+
+特性：
+
+- A4 版面、封面、目录（带页码）、页眉页脚（`当前页 / 总页数`）
+- 每个 `##` 章节自动另起一页；页数 ≥ 3 才会通过自检
+- 只用标准 Markdown 子集（标题 / 表格 / 列表 / 引用框 / 代码块），不依赖 pandoc、wkhtmltopdf、LaTeX
+- 中文字体走系统 `PingFang SC`，无需嵌入字体文件
+- 依赖：macOS / Linux 上装有 Chrome 或 Chromium（可用 `CHROME_PATH` 指定）
 
 ## 设计取向
 
@@ -48,7 +70,7 @@ my-skills/
 
 1. **先诊断再推荐** —— 没有起点就没有路径。默认零问启动（声明假设直接跑），用户要定制时才问五个问题。
 2. **给图不给清单** —— 知识大纲是树（由哪几块组成），概念图是网（谁依赖谁），两者不互相复制。
-3. **每个输入配一个输出** —— 没有检索题或产出任务的资源条目，视为未完成。
+3. **每个输入配一个输出** —— 没有检索题或产出任务的资源条目，视为未完成；答案统一放附录，正文不泄漏。
 4. **不编造** —— 书名、作者、播客期号是模型幻觉高发区，凡是无法核验的一律标"待核实"。
 
 ## License
